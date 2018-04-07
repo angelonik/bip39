@@ -14,7 +14,7 @@
     var showPubKey = true;
     var showPrivKey = true;
     var showQr = false;
-    var litecoinUseLtub = false;
+    var litecoinUseLtub = true;
 
     var entropyChangeTimeoutEvent = null;
     var phraseChangeTimeoutEvent = null;
@@ -37,6 +37,8 @@
     DOM.entropyBitsPerEvent = DOM.entropyContainer.find(".bits-per-event");
     DOM.entropyWordCount = DOM.entropyContainer.find(".word-count");
     DOM.entropyBinary = DOM.entropyContainer.find(".binary");
+    DOM.entropyWordIndexes = DOM.entropyContainer.find(".word-indexes");
+    DOM.entropyChecksum = DOM.entropyContainer.find(".checksum");
     DOM.entropyMnemonicLength = DOM.entropyContainer.find(".mnemonic-length");
     DOM.entropyFilterWarning = DOM.entropyContainer.find(".filter-warning");
     DOM.phrase = $(".phrase");
@@ -52,6 +54,8 @@
     DOM.bip32tab = $("#bip32-tab");
     DOM.bip44tab = $("#bip44-tab");
     DOM.bip49tab = $("#bip49-tab");
+    DOM.bip84tab = $("#bip84-tab");
+    DOM.bip141tab = $("#bip141-tab");
     DOM.bip32panel = $("#bip32");
     DOM.bip44panel = $("#bip44");
     DOM.bip49panel = $("#bip49");
@@ -72,12 +76,29 @@
     DOM.bip49accountXprv = $("#bip49 .account-xprv");
     DOM.bip49accountXpub = $("#bip49 .account-xpub");
     DOM.bip49change = $("#bip49 .change");
+    DOM.bip84path = $("#bip84-path");
+    DOM.bip84purpose = $("#bip84 .purpose");
+    DOM.bip84coin = $("#bip84 .coin");
+    DOM.bip84account = $("#bip84 .account");
+    DOM.bip84accountXprv = $("#bip84 .account-xprv");
+    DOM.bip84accountXpub = $("#bip84 .account-xpub");
+    DOM.bip84change = $("#bip84 .change");
+    DOM.bip141unavailable = $("#bip141 .unavailable");
+    DOM.bip141available = $("#bip141 .available");
+    DOM.bip141path = $("#bip141-path");
+    DOM.bip141semantics = $(".bip141-semantics");
     DOM.generatedStrength = $(".generate-container .strength");
     DOM.hardenedAddresses = $(".hardened-addresses");
-    DOM.useP2wpkhNestedInP2sh = $(".p2wpkh-nested-in-p2sh");
+    DOM.useBitpayAddressesContainer = $(".use-bitpay-addresses-container");
+    DOM.useBitpayAddresses = $(".use-bitpay-addresses");
+    DOM.useBip38 = $(".use-bip38");
+    DOM.bip38Password = $(".bip38-password");
     DOM.addresses = $(".addresses");
+    DOM.csvTab = $("#csv-tab a");
+    DOM.csv = $(".csv");
     DOM.rowsToAdd = $(".rows-to-add");
     DOM.more = $(".more");
+    DOM.moreRowsStartIndex = $(".more-rows-start-index");
     DOM.feedback = $(".feedback");
     DOM.tab = $(".derivation-type a");
     DOM.indexToggle = $(".index-toggle");
@@ -109,14 +130,21 @@
         DOM.bip44change.on("input", calcForDerivationPath);
         DOM.bip49account.on("input", calcForDerivationPath);
         DOM.bip49change.on("input", calcForDerivationPath);
-        DOM.tab.on("shown.bs.tab", calcForDerivationPath);
+        DOM.bip84account.on("input", calcForDerivationPath);
+        DOM.bip84change.on("input", calcForDerivationPath);
+        DOM.bip141path.on("input", calcForDerivationPath);
+        DOM.bip141semantics.on("change", tabChanged);
+        DOM.tab.on("shown.bs.tab", tabChanged);
         DOM.hardenedAddresses.on("change", calcForDerivationPath);
-        DOM.useP2wpkhNestedInP2sh.on("change", calcForDerivationPath);
+        DOM.useBip38.on("change", calcForDerivationPath);
+        DOM.bip38Password.on("change", calcForDerivationPath);
         DOM.indexToggle.on("click", toggleIndexes);
         DOM.addressToggle.on("click", toggleAddresses);
         DOM.publicKeyToggle.on("click", togglePublicKeys);
         DOM.privateKeyToggle.on("click", togglePrivateKeys);
+        DOM.csvTab.on("click", updateCsv);
         DOM.languages.on("click", languageChanged);
+        DOM.useBitpayAddresses.on("change", useBitpayAddressesChange);
         setQrEvents(DOM.showQrEls);
         disableForms();
         hidePending();
@@ -131,14 +159,16 @@
         clearDerivedKeys();
         clearAddressesList();
         DOM.litecoinLtubContainer.addClass("hidden");
+        DOM.useBitpayAddressesContainer.addClass("hidden");
         var networkIndex = e.target.value;
         var network = networks[networkIndex];
         network.onSelect();
-        if (network.p2wpkhNestedInP2shAvailable) {
-            showP2wpkhNestedInP2shAvailable();
+        if (network.segwitAvailable) {
+            adjustNetworkForSegwit();
+            showSegwitAvailable();
         }
         else {
-            showP2wpkhNestedInP2shUnavailable();
+            showSegwitUnavailable();
         }
         if (seed != null) {
             phraseChanged();
@@ -207,6 +237,37 @@
         // Calculate and display
         var passphrase = DOM.passphrase.val();
         calcBip32RootKeyFromSeed(phrase, passphrase);
+        calcForDerivationPath();
+        // Show the word indexes
+        showWordIndexes();
+    }
+
+    function tabChanged() {
+        showPending();
+        adjustNetworkForSegwit();
+        var phrase = DOM.phrase.val();
+        if (phrase != "") {
+            // Calculate and display for mnemonic
+            var errorText = findPhraseErrors(phrase);
+            if (errorText) {
+                showValidationError(errorText);
+                return;
+            }
+            // Calculate and display
+            var passphrase = DOM.passphrase.val();
+            calcBip32RootKeyFromSeed(phrase, passphrase);
+        }
+        else {
+            // Calculate and display for root key
+            var rootKeyBase58 = DOM.rootKey.val();
+            var errorText = validateRootKey(rootKeyBase58);
+            if (errorText) {
+                showValidationError(errorText);
+                return;
+            }
+            // Calculate and display
+            calcBip32RootKeyFromBase58(rootKeyBase58);
+        }
         calcForDerivationPath();
     }
 
@@ -284,10 +345,10 @@
     function litecoinUseLtubChanged() {
         litecoinUseLtub = DOM.litecoinUseLtub.prop("checked");
         if (litecoinUseLtub) {
-            network = bitcoinjs.bitcoin.networks.litecoinLtub;
+            network = bitcoinjs.bitcoin.networks.litecoin;
         }
         else {
-            network = bitcoinjs.bitcoin.networks.litecoin;
+            network = bitcoinjs.bitcoin.networks.litecoinXprv;
         }
         phraseChanged();
     }
@@ -296,8 +357,8 @@
         clearDerivedKeys();
         clearAddressesList();
         showPending();
-        // Don't show bip49 if it's selected but network doesn't support it
-        if (bip49TabSelected() && !networkHasBip49()) {
+        // Don't show segwit if it's selected but network doesn't support it
+        if (segwitSelected() && !networkHasSegwit()) {
             return;
         }
         // Get the derivation path
@@ -311,8 +372,11 @@
         if (bip44TabSelected()) {
             displayBip44Info();
         }
-        if (bip49TabSelected()) {
+        else if (bip49TabSelected()) {
             displayBip49Info();
+        }
+        else if (bip84TabSelected()) {
+            displayBip84Info();
         }
         displayBip32Info();
     }
@@ -347,6 +411,11 @@
         }, 50);
     }
 
+    function useBitpayAddressesChange() {
+        setBitcoinCashNetworkValues();
+        phraseChanged();
+    }
+
     function toggleIndexes() {
         showIndex = !showIndex;
         $("td.index span").toggleClass("invisible");
@@ -375,10 +444,20 @@
             showValidationError(errorText);
             return;
         }
+        // get the amount of entropy to use
         var numWords = parseInt(DOM.generatedStrength.val());
         var strength = numWords / 3 * 32;
-        var words = mnemonic.generate(strength);
+        var buffer = new Uint8Array(strength / 8);
+        // create secure entropy
+        var data = crypto.getRandomValues(buffer);
+        // show the words
+        var words = mnemonic.toMnemonic(data);
         DOM.phrase.val(words);
+        // show the entropy
+        var entropyHex = uint8ArrayToHex(data);
+        DOM.entropy.val(entropyHex);
+        // ensure entropy fields are consistent with what is being displayed
+        DOM.entropyMnemonicLength.val("raw");
         return words;
     }
 
@@ -486,7 +565,7 @@
             console.log("Using derivation path from BIP44 tab: " + derivationPath);
             return derivationPath;
         }
-        if (bip49TabSelected()) {
+        else if (bip49TabSelected()) {
             var purpose = parseIntNoNaN(DOM.bip49purpose.val(), 49);
             var coin = parseIntNoNaN(DOM.bip49coin.val(), 0);
             var account = parseIntNoNaN(DOM.bip49account.val(), 0);
@@ -501,9 +580,29 @@
             console.log("Using derivation path from BIP49 tab: " + derivationPath);
             return derivationPath;
         }
+        else if (bip84TabSelected()) {
+            var purpose = parseIntNoNaN(DOM.bip84purpose.val(), 84);
+            var coin = parseIntNoNaN(DOM.bip84coin.val(), 0);
+            var account = parseIntNoNaN(DOM.bip84account.val(), 0);
+            var change = parseIntNoNaN(DOM.bip84change.val(), 0);
+            var path = "m/";
+            path += purpose + "'/";
+            path += coin + "'/";
+            path += account + "'/";
+            path += change;
+            DOM.bip84path.val(path);
+            var derivationPath = DOM.bip84path.val();
+            console.log("Using derivation path from BIP84 tab: " + derivationPath);
+            return derivationPath;
+        }
         else if (bip32TabSelected()) {
             var derivationPath = DOM.bip32path.val();
             console.log("Using derivation path from BIP32 tab: " + derivationPath);
+            return derivationPath;
+        }
+        else if (bip141TabSelected()) {
+            var derivationPath = DOM.bip141path.val();
+            console.log("Using derivation path from BIP141 tab: " + derivationPath);
             return derivationPath;
         }
         else {
@@ -596,6 +695,24 @@
         DOM.bip49accountXpub.val(accountXpub);
     }
 
+    function displayBip84Info() {
+        // Get the derivation path for the account
+        var purpose = parseIntNoNaN(DOM.bip84purpose.val(), 84);
+        var coin = parseIntNoNaN(DOM.bip84coin.val(), 0);
+        var account = parseIntNoNaN(DOM.bip84account.val(), 0);
+        var path = "m/";
+        path += purpose + "'/";
+        path += coin + "'/";
+        path += account + "'/";
+        // Calculate the account extended keys
+        var accountExtendedKey = calcBip32ExtendedKey(path);
+        var accountXprv = accountExtendedKey.toBase58();
+        var accountXpub = accountExtendedKey.neutered().toBase58();
+        // Display the extended keys
+        DOM.bip84accountXprv.val(accountXprv);
+        DOM.bip84accountXpub.val(accountXpub);
+    }
+
     function displayBip32Info() {
         // Display the key
         DOM.seed.val(seed);
@@ -611,7 +728,8 @@
         DOM.extendedPubKey.val(extendedPubKey);
         // Display the addresses and privkeys
         clearAddressesList();
-        displayAddresses(0, 20);
+        var initialAddressCount = parseInt(DOM.rowsToAdd.val());
+        displayAddresses(0, initialAddressCount);
     }
 
     function displayAddresses(start, total) {
@@ -635,13 +753,31 @@
         })());
     }
 
+    function segwitSelected() {
+        return bip49TabSelected() || bip84TabSelected() || bip141TabSelected();
+    }
+
+    function p2wpkhSelected() {
+        return bip84TabSelected() ||
+                bip141TabSelected() && DOM.bip141semantics.val() == "p2wpkh";
+    }
+
+    function p2wpkhInP2shSelected() {
+        return bip49TabSelected() ||
+            (bip141TabSelected() && DOM.bip141semantics.val() == "p2wpkh-p2sh");
+    }
+
     function TableRow(index, isLast) {
 
         var self = this;
         this.shouldGenerate = true;
         var useHardenedAddresses = DOM.hardenedAddresses.prop("checked");
-        var isP2wpkhNestedInP2sh = bip49TabSelected() || (bip32TabSelected() && useP2wpkhNestedInP2sh());
-        var p2wpkhNestedInP2shAvailable = networkHasBip49();
+        var useBip38 = DOM.useBip38.prop("checked");
+        var bip38password = DOM.bip38Password.val();
+        var isSegwit = segwitSelected();
+        var segwitAvailable = networkHasSegwit();
+        var isP2wpkh = p2wpkhSelected();
+        var isP2wpkhInP2sh = p2wpkhInP2shSelected();
 
         function init() {
             calculateValues();
@@ -652,6 +788,7 @@
                 if (!self.shouldGenerate) {
                     return;
                 }
+                // derive HDkey for this row of the table
                 var key = "NA";
                 if (useHardenedAddresses) {
                     key = bip32ExtendedKey.deriveHardened(index);
@@ -659,19 +796,36 @@
                 else {
                     key = bip32ExtendedKey.derive(index);
                 }
-                var address = key.getAddress().toString();
-                var privkey = "NA";
-                if (!key.isNeutered()) {
-                    privkey = key.keyPair.toWIF(network);
+                // bip38 requires uncompressed keys
+                // see https://github.com/iancoleman/bip39/issues/140#issuecomment-352164035
+                var keyPair = key.keyPair;
+                var useUncompressed = useBip38;
+                if (useUncompressed) {
+                    keyPair = new bitcoinjs.bitcoin.ECPair(keyPair.d, null, { compressed: false });
                 }
-                var pubkey = key.getPublicKeyBuffer().toString('hex');
+                // get address
+                var address = keyPair.getAddress().toString();
+                // get privkey
+                var hasPrivkey = !key.isNeutered();
+                var privkey = "NA";
+                if (hasPrivkey) {
+                    privkey = keyPair.toWIF(network);
+                    // BIP38 encode private key if required
+                    if (useBip38) {
+                        privkey = bitcoinjsBip38.encrypt(keyPair.d.toBuffer(), false, bip38password, function(p) {
+                            console.log("Progressed " + p.percent.toFixed(1) + "% for index " + index);
+                        });
+                    }
+                }
+                // get pubkey
+                var pubkey = keyPair.getPublicKeyBuffer().toString('hex');
                 var indexText = getDerivationPath() + "/" + index;
                 if (useHardenedAddresses) {
                     indexText = indexText + "'";
                 }
                 // Ethereum values are different
                 if (networks[DOM.network.val()].name == "ETH - Ethereum") {
-                    var privKeyBuffer = key.keyPair.d.toBuffer();
+                    var privKeyBuffer = keyPair.d.toBuffer(32);
                     privkey = privKeyBuffer.toString('hex');
                     var addressBuffer = ethUtil.privateToAddress(privKeyBuffer);
                     var hexAddress = addressBuffer.toString('hex');
@@ -685,20 +839,28 @@
                     privkey = convertRipplePriv(privkey);
                     address = convertRippleAdrr(address);
                 }
-                // BIP49 addresses are different
-                if (isP2wpkhNestedInP2sh) {
-                    if (!p2wpkhNestedInP2shAvailable) {
+                // Segwit addresses are different
+                if (isSegwit) {
+                    if (!segwitAvailable) {
                         return;
                     }
-                    var keyhash = bitcoinjs.bitcoin.crypto.hash160(key.getPublicKeyBuffer());
-                    var scriptsig = bitcoinjs.bitcoin.script.witnessPubKeyHash.output.encode(keyhash);
-                    var addressbytes = bitcoinjs.bitcoin.crypto.hash160(scriptsig);
-                    var scriptpubkey = bitcoinjs.bitcoin.script.scriptHash.output.encode(addressbytes);
-                    address = bitcoinjs.bitcoin.address.fromOutputScript(scriptpubkey, network)
+                    if (isP2wpkh) {
+                        var keyhash = bitcoinjs.bitcoin.crypto.hash160(key.getPublicKeyBuffer());
+                        var scriptpubkey = bitcoinjs.bitcoin.script.witnessPubKeyHash.output.encode(keyhash);
+                        address = bitcoinjs.bitcoin.address.fromOutputScript(scriptpubkey, network)
+                    }
+                    else if (isP2wpkhInP2sh) {
+                        var keyhash = bitcoinjs.bitcoin.crypto.hash160(key.getPublicKeyBuffer());
+                        var scriptsig = bitcoinjs.bitcoin.script.witnessPubKeyHash.output.encode(keyhash);
+                        var addressbytes = bitcoinjs.bitcoin.crypto.hash160(scriptsig);
+                        var scriptpubkey = bitcoinjs.bitcoin.script.scriptHash.output.encode(addressbytes);
+                        address = bitcoinjs.bitcoin.address.fromOutputScript(scriptpubkey, network)
+                    }
                 }
                 addAddressToList(indexText, address, pubkey, privkey);
                 if (isLast) {
                     hidePending();
+                    updateCsv();
                 }
             }, 50)
         }
@@ -708,11 +870,18 @@
     }
 
     function showMore() {
-        var start = DOM.addresses.children().length;
         var rowsToAdd = parseInt(DOM.rowsToAdd.val());
         if (isNaN(rowsToAdd)) {
             rowsToAdd = 20;
             DOM.rowsToAdd.val("20");
+        }
+        var start = parseInt(DOM.moreRowsStartIndex.val())
+        if (isNaN(start)) {
+            start = lastIndexInTable() + 1;
+        }
+        else {
+            var newStart = start + rowsToAdd;
+            DOM.moreRowsStartIndex.val(newStart);
         }
         if (rowsToAdd > 200) {
             var msg = "Generating " + rowsToAdd + " rows could take a while. ";
@@ -732,6 +901,7 @@
 
     function clearAddressesList() {
         DOM.addresses.empty();
+        DOM.csv.val("");
         stopGenerating();
     }
 
@@ -972,7 +1142,7 @@
     function wordArrayToPhrase(words) {
         var phrase = words.join(" ");
         var language = getLanguageFromPhrase(phrase);
-        if (language == "japanese") {
+        if (language == "japanese" || language == "korean") {
             phrase = words.join("\u3000");
         }
         return phrase;
@@ -1024,6 +1194,10 @@
         var phrase = mnemonic.toMnemonic(entropyArr);
         // Set the mnemonic in the UI
         DOM.phrase.val(phrase);
+        // Show the word indexes
+        showWordIndexes();
+        // Show the checksum
+        showChecksum();
     }
 
     function clearEntropyFeedback() {
@@ -1054,13 +1228,14 @@
         var entropyTypeStr = getEntropyTypeStr(entropy);
         var wordCount = Math.floor(numberOfBits / 32) * 3;
         var bitsPerEvent = entropy.bitsPerEvent.toFixed(2);
+        var spacedBinaryStr = addSpacesEveryElevenBits(entropy.binaryStr);
         DOM.entropyFiltered.html(entropy.cleanHtml);
         DOM.entropyType.text(entropyTypeStr);
         DOM.entropyCrackTime.text(timeToCrack);
         DOM.entropyEventCount.text(entropy.base.ints.length);
         DOM.entropyBits.text(numberOfBits);
         DOM.entropyWordCount.text(wordCount);
-        DOM.entropyBinary.text(entropy.binaryStr);
+        DOM.entropyBinary.text(spacedBinaryStr);
         DOM.entropyBitsPerEvent.text(bitsPerEvent);
         // detect and warn of filtering
         var rawNoSpaces = DOM.entropy.val().replace(/\s/g, "");
@@ -1146,8 +1321,13 @@
     function createQr(e) {
         var content = e.target.textContent || e.target.value;
         if (content) {
-            var size = 130;
-            DOM.qrImage.qrcode({width: size, height: size, text: content});
+            var qrEl = kjua({
+                text: content,
+                render: "canvas",
+                size: 310,
+                ecLevel: 'H',
+            });
+            DOM.qrImage.append(qrEl);
             if (!showQr) {
                 DOM.qrHider.addClass("hidden");
             }
@@ -1177,48 +1357,199 @@
         return DOM.bip32tab.hasClass("active");
     }
 
-    function useP2wpkhNestedInP2sh() {
-        return DOM.useP2wpkhNestedInP2sh.prop("checked");
-    }
-
-    function networkHasBip49() {
-        return networks[DOM.network.val()].p2wpkhNestedInP2shAvailable;
+    function networkHasSegwit() {
+        return networks[DOM.network.val()].segwitAvailable;
     }
 
     function bip49TabSelected() {
         return DOM.bip49tab.hasClass("active");
     }
 
+    function bip84TabSelected() {
+        return DOM.bip84tab.hasClass("active");
+    }
+
+    function bip141TabSelected() {
+        return DOM.bip141tab.hasClass("active");
+    }
+
     function setHdCoin(coinValue) {
         DOM.bip44coin.val(coinValue);
         DOM.bip49coin.val(coinValue);
+        DOM.bip84coin.val(coinValue);
     }
 
-    function showP2wpkhNestedInP2shAvailable() {
+    function showSegwitAvailable() {
         DOM.bip49unavailable.addClass("hidden");
         DOM.bip49available.removeClass("hidden");
-        DOM.useP2wpkhNestedInP2sh.prop("disabled", false);
+        DOM.bip141unavailable.addClass("hidden");
+        DOM.bip141available.removeClass("hidden");
     }
 
-    function showP2wpkhNestedInP2shUnavailable() {
+    function showSegwitUnavailable() {
         DOM.bip49available.addClass("hidden");
         DOM.bip49unavailable.removeClass("hidden");
-        DOM.useP2wpkhNestedInP2sh.prop("disabled", true);
-        DOM.useP2wpkhNestedInP2sh.prop("checked", false);
+        DOM.bip141available.addClass("hidden");
+        DOM.bip141unavailable.removeClass("hidden");
+    }
+
+    function useBitpayAddresses() {
+        return !(DOM.useBitpayAddresses.prop("checked"));
+    }
+
+    function setBitcoinCashNetworkValues() {
+        if (useBitpayAddresses()) {
+            network = bitcoinjs.bitcoin.networks.bitcoin;
+        }
+        else {
+            network = bitcoinjs.bitcoin.networks.bitcoinCashBitbpay;
+        }
+    }
+
+    function adjustNetworkForSegwit() {
+        // If segwit is selected the xpub/xprv prefixes need to be adjusted
+        // to avoid accidentally importing BIP49 xpub to BIP44 watch only
+        // wallet.
+        // See https://github.com/iancoleman/bip39/issues/125
+        var segwitNetworks = null;
+        // if a segwit network is alread selected, need to use base network to
+        // look up new parameters
+        if ("baseNetwork" in network) {
+            network = bitcoinjs.bitcoin.networks[network.baseNetwork];
+        }
+        // choose the right segwit params
+        if (p2wpkhSelected() && "p2wpkh" in network) {
+            network = network.p2wpkh;
+        }
+        else if (p2wpkhInP2shSelected() && "p2wpkhInP2sh" in network) {
+            network = network.p2wpkhInP2sh;
+        }
+    }
+
+    function lastIndexInTable() {
+        var pathText = DOM.addresses.find(".index").last().text();
+        var pathBits = pathText.split("/");
+        var lastBit = pathBits[pathBits.length-1];
+        var lastBitClean = lastBit.replace("'", "");
+        return parseInt(lastBitClean);
+    }
+
+    function uint8ArrayToHex(a) {
+        var s = ""
+        for (var i=0; i<a.length; i++) {
+            var h = a[i].toString(16);
+            while (h.length < 2) {
+                h = "0" + h;
+            }
+            s = s + h;
+        }
+        return s;
+    }
+
+    function showWordIndexes() {
+        var phrase = DOM.phrase.val();
+        var words = phraseToWordArray(phrase);
+        var wordIndexes = [];
+        var language = getLanguage();
+        for (var i=0; i<words.length; i++) {
+            var word = words[i];
+            var wordIndex = WORDLISTS[language].indexOf(word);
+            wordIndexes.push(wordIndex);
+        }
+        var wordIndexesStr = wordIndexes.join(", ");
+        DOM.entropyWordIndexes.text(wordIndexesStr);
+    }
+
+    function showChecksum() {
+        var phrase = DOM.phrase.val();
+        var words = phraseToWordArray(phrase);
+        var checksumBitlength = words.length / 3;
+        var checksum = "";
+        var binaryStr = "";
+        var language = getLanguage();
+        for (var i=words.length-1; i>=0; i--) {
+            var word = words[i];
+            var wordIndex = WORDLISTS[language].indexOf(word);
+            var wordBinary = wordIndex.toString(2);
+            while (wordBinary.length < 11) {
+                wordBinary = "0" + wordBinary;
+            }
+            var binaryStr = wordBinary + binaryStr;
+            if (binaryStr.length >= checksumBitlength) {
+                var start = binaryStr.length - checksumBitlength;
+                var end = binaryStr.length;
+                checksum = binaryStr.substring(start, end);
+                // add spaces so the last group is 11 bits, not the first
+                checksum = checksum.split("").reverse().join("")
+                checksum = addSpacesEveryElevenBits(checksum);
+                checksum = checksum.split("").reverse().join("")
+                break;
+            }
+        }
+        DOM.entropyChecksum.text(checksum);
+    }
+
+    function updateCsv() {
+        var tableCsv = "path,address,public key,private key\n";
+        var rows = DOM.addresses.find("tr");
+        for (var i=0; i<rows.length; i++) {
+            var row = $(rows[i]);
+            var cells = row.find("td");
+            for (var j=0; j<cells.length; j++) {
+                var cell = $(cells[j]);
+                if (!cell.children().hasClass("invisible")) {
+                    tableCsv = tableCsv + cell.text();
+                }
+                if (j != cells.length - 1) {
+                    tableCsv = tableCsv + ",";
+                }
+            }
+            tableCsv = tableCsv + "\n";
+        }
+        DOM.csv.val(tableCsv);
+    }
+
+    function addSpacesEveryElevenBits(binaryStr) {
+        return binaryStr.match(/.{1,11}/g).join(" ");
     }
 
     var networks = [
         {
-            name: "BCH - Bitcoin Cash",
-            p2wpkhNestedInP2shAvailable: false,
+            name: "AXE - Axe",
+            segwitAvailable: false,
             onSelect: function() {
-                network = bitcoinjs.bitcoin.networks.bitcoin;
+                network = bitcoinjs.bitcoin.networks.axe;
+                setHdCoin(0);
+            },
+        },
+        {
+            name: "BCH - Bitcoin Cash",
+            segwitAvailable: false,
+            onSelect: function() {
+                DOM.useBitpayAddressesContainer.removeClass("hidden");
+                setBitcoinCashNetworkValues();
                 setHdCoin(145);
             },
         },
         {
+            name: "BEET - Beetlecoin",
+            segwitAvailable: false,
+            onSelect: function() {
+                network = bitcoinjs.bitcoin.networks.beetlecoin;
+                setHdCoin(800);
+            },
+        },
+        {
+            name: "BLK - BlackCoin",
+            segwitAvailable: false,
+            onSelect: function() {
+                network = bitcoinjs.bitcoin.networks.blackcoin;
+                setHdCoin(10);
+            },
+        },
+        {
             name: "BTC - Bitcoin",
-            p2wpkhNestedInP2shAvailable: true,
+            segwitAvailable: true,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.bitcoin;
                 setHdCoin(0);
@@ -1226,15 +1557,23 @@
         },
         {
             name: "BTC - Bitcoin Testnet",
-            p2wpkhNestedInP2shAvailable: true,
+            segwitAvailable: true,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.testnet;
                 setHdCoin(1);
             },
         },
         {
+            name: "BTG - Bitcoin Gold",
+            segwitAvailable: true,
+            onSelect: function() {
+                network = bitcoinjs.bitcoin.networks.bgold;
+                setHdCoin(156);
+            },
+        },
+        {
             name: "CLAM - Clams",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.clam;
                 setHdCoin(23);
@@ -1242,7 +1581,7 @@
         },
         {
             name: "CRW - Crown",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.crown;
                 setHdCoin(72);
@@ -1250,7 +1589,7 @@
         },
         {
             name: "DASH - Dash",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.dash;
                 setHdCoin(5);
@@ -1258,15 +1597,23 @@
         },
         {
             name: "DASH - Dash Testnet",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.dashtn;
                 setHdCoin(1);
             },
         },
         {
+            name: "DNR - Denarius",
+            segwitAvailable: false,
+            onSelect: function() {
+                network = bitcoinjs.bitcoin.networks.denarius;
+                setHdCoin(116);
+            },
+        },
+        {
             name: "DOGE - Dogecoin",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.dogecoin;
                 setHdCoin(3);
@@ -1274,15 +1621,23 @@
         },
         {
             name: "ETH - Ethereum",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.bitcoin;
                 setHdCoin(60);
             },
         },
         {
+            name: "FJC - Fujicoin",
+            segwitAvailable: false,
+            onSelect: function() {
+                network = bitcoinjs.bitcoin.networks.fujicoin;
+                setHdCoin(75);
+            },
+        },
+        {
             name: "GAME - GameCredits",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.game;
                 setHdCoin(101);
@@ -1290,15 +1645,23 @@
         },
         {
             name: "JBS - Jumbucks",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.jumbucks;
                 setHdCoin(26);
             },
         },
         {
+            name: "KMD - Komodo",
+            bip49available: false,
+            onSelect: function() {
+                network = bitcoinjs.bitcoin.networks.komodo;
+                setHdCoin(141);
+            },
+        },
+        {
             name: "LTC - Litecoin",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: true,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.litecoin;
                 setHdCoin(2);
@@ -1307,24 +1670,47 @@
         },
         {
             name: "MAZA - Maza",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.maza;
                 setHdCoin(13);
             },
         },
-
+        {
+            name: "MONA - Monacoin",
+            segwitAvailable: true,
+            onSelect: function() {
+                network = bitcoinjs.bitcoin.networks.monacoin,
+                setHdCoin(22);
+            },
+        },
+        {
+            name: "NEBL - Neblio",
+            segwitAvailable: false,
+            onSelect: function() {
+                network = bitcoinjs.bitcoin.networks.neblio;
+                setHdCoin(146);
+            },
+        },
         {
             name: "NMC - Namecoin",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.namecoin;
                 setHdCoin(7);
             },
         },
         {
+            name: "ONX - Onixcoin",
+            segwitAvailable: false,
+            onSelect: function() {
+                network = bitcoinjs.bitcoin.networks.onixcoin;
+                setHdCoin(174);
+            },
+        },
+        {
             name: "PIVX - PIVX",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.pivx;
                 setHdCoin(119);
@@ -1332,7 +1718,7 @@
         },
         {
             name: "PIVX - PIVX Testnet",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.pivxtestnet;
                 setHdCoin(1);
@@ -1340,7 +1726,7 @@
         },
         {
             name: "PPC - Peercoin",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.peercoin;
                 setHdCoin(6);
@@ -1348,7 +1734,7 @@
         },
         {
             name: "SDC - ShadowCash",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.shadow;
                 setHdCoin(35);
@@ -1356,7 +1742,7 @@
         },
         {
             name: "SDC - ShadowCash Testnet",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.shadowtn;
                 setHdCoin(1);
@@ -1364,7 +1750,7 @@
         },
         {
             name: "SLM - Slimcoin",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.slimcoin;
                 setHdCoin(63);
@@ -1372,15 +1758,23 @@
         },
         {
             name: "SLM - Slimcoin Testnet",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.slimcointn;
                 setHdCoin(111);
             },
         },
         {
+            name: "USNBT - NuBits",
+            segwitAvailable: false,
+            onSelect: function() {
+                network = bitcoinjs.bitcoin.networks.nubits;
+                setHdCoin(12);
+            },
+        },
+        {
             name: "VIA - Viacoin",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.viacoin;
                 setHdCoin(14);
@@ -1388,7 +1782,7 @@
         },
         {
             name: "VIA - Viacoin Testnet",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.viacointestnet;
                 setHdCoin(1);
@@ -1396,7 +1790,7 @@
         },
         {
             name: "XMY - Myriadcoin",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.myriadcoin;
                 setHdCoin(90);
@@ -1404,12 +1798,12 @@
         },
         {
             name: "XRP - Ripple",
-            p2wpkhNestedInP2shAvailable: false,
+            segwitAvailable: false,
             onSelect: function() {
                 network = bitcoinjs.bitcoin.networks.bitcoin;
                 setHdCoin(144);
             },
-        }
+        },
     ]
 
     var clients = [

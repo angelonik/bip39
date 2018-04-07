@@ -1,3 +1,64 @@
+# 0.3.4
+
+* Add BlackCoin
+* Add Denarius
+* Raw entropy shows groupings with space every 11 bits
+* Checksum shown in entropy details
+* Warn that entropy values should exclude checksum
+* Add Korean language
+
+# 0.3.3
+
+* Add AXE network
+* Ethereum private key generation bugfix
+* Add BIP38 support
+* Allow initial number of rows to be set by the user
+
+# 0.3.2
+
+* Add Onixcoin
+* Add Komodo
+* BIP84 tab for derivation path
+* CSV tab for derived addresses
+
+# 0.3.1
+
+* Populate entropy field with hex value used from PRNG
+* Show list of word indexes
+* Fix typos
+* Update jquery from 2.1.1 to 3.2.1
+* Update bootstrap from 3.2.0 to 3.3.7
+* Move application-specific css into own file
+* QR codes with accents work correctly by replacing jquery.qrcode with kjua
+
+# 0.3.0
+
+* Update bitcoinjs from 3.1.1 to 3.3.0
+* Litecoin defaults to ltub instead of xpub
+* Segwit option removed from bip32 tab
+* BIP141 tab added for full segwit compatibility
+
+# 0.2.9
+
+* Update links from old site to new site
+* Add Monacoin
+* Add Bitcoin Gold
+* Port test suite to selenium
+* Allow more rows to be generated starting from a custom index
+
+# 0.2.8
+
+* Enable segwit for Litecoin
+* BitPay-style addresses for Bitcoin Cash
+* Use new xpub/xprv prefixes for Segwit BIP49
+* Add nubits network
+
+# 0.2.7
+
+* Add Fujicoin
+* List alternative tools
+* Remove unused translations and library
+
 # 0.2.6
 
 * Detect and warn when entropy is filtered / discarded
